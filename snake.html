@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Snake Game</title>
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+      background: radial-gradient(circle at top, #1a2a2f 0%, #050607 100%);
+      color: #eee;
+      font-family: system-ui, sans-serif;
+    }
+    #container {
+      position: relative;
+      width: min(100vw, 420px);
+      max-width: 420px;
+    }
+    #score,
+    #message {
+      position: absolute;
+      left: 0;
+      padding: 0.8rem 1rem;
+      font-size: 0.95rem;
+      letter-spacing: 0.05em;
+      background: rgba(0, 0, 0, 0.55);
+      border-radius: 0.75rem;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.03);
+    }
+    #score { top: -3.2rem; color: #7cff96; }
+    #message { top: -6.4rem; color: #e0e0ff; }
+    canvas {
+      width: 100%;
+      max-width: 400px;
+      aspect-ratio: 1 / 1;
+      image-rendering: crisp-edges;
+      background: #08110f;
+      box-shadow: 0 0 0 8px rgba(25, 255, 128, 0.03), 0 20px 60px rgba(0, 0, 0, 0.55);
+      border-radius: 1rem;
+      display: block;
+    }
+    #mobile-controls {
+      margin: 1rem auto 0;
+      width: min(100vw, 400px);
+      max-width: 400px;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(3rem, 1fr));
+      gap: 0.75rem;
+      justify-items: center;
+      align-items: center;
+      touch-action: none;
+      user-select: none;
+    }
+
+    #mobile-controls button {
+      width: min(4rem, 22vw);
+      height: min(4rem, 22vw);
+      border: none;
+      border-radius: 1rem;
+      background: rgba(255, 255, 255, 0.08);
+      color: #f8fafc;
+      font-size: 1.6rem;
+      font-weight: 700;
+      box-shadow: 0 12px 20px rgba(0, 0, 0, 0.18);
+      transition: transform 0.16s ease, background 0.16s ease;
+    }
+
+    #mobile-controls button:active,
+    #mobile-controls button:hover {
+      transform: scale(0.98);
+      background: rgba(255, 255, 255, 0.18);
+    }
+
+    #mobile-controls button[data-dir="up"],
+    #mobile-controls button[data-dir="down"],
+    #mobile-controls button[data-dir="left"],
+    #mobile-controls button[data-dir="right"] {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <div id="score">Score: 0</div>
+    <div id="message">Use arrow keys, WASD, or touch controls</div>
+    <canvas id="game" width="400" height="400"></canvas>
+  </div>
+  <div id="mobile-controls">
+    <button data-dir="up" aria-label="Up">↑</button>
+    <div></div>
+    <div></div>
+    <button data-dir="left" aria-label="Left">←</button>
+    <button data-dir="down" aria-label="Down">↓</button>
+    <button data-dir="right" aria-label="Right">→</button>
+  </div>
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('score');
+    const messageEl = document.getElementById('message');
+
+    const tileSize = 20;
+    const tileCount = canvas.width / tileSize;
+
+    let snake = [{ x: 10, y: 10 }];
+    let velocity = { x: 0, y: 0 };
+    let apple = randomPosition();
+    let score = 0;
+    let speed = 8;
+    let gameOver = false;
+    let lastTime = 0;
+
+    const directionMap = {
+      ArrowUp: { x: 0, y: -1 },
+      ArrowDown: { x: 0, y: 1 }, ArrowLeft: { x: -1, y: 0 },
+      ArrowRight: { x: 1, y: 0 },
+      w: { x: 0, y: -1 },
+      s: { x: 0, y: 1 },
+      a: { x: -1, y: 0 },
+      d: { x: 1, y: 0 },
+      W: { x: 0, y: -1 },
+      S: { x: 0, y: 1 },
+      A: { x: -1, y: 0 },
+      D: { x: 1, y: 0 }
+    };
+
+    function setDirection(nextVel) {
+      if (!nextVel) return;
+      if (snake.length > 1 && nextVel.x === -velocity.x && nextVel.y === -velocity.y) {
+        return;
+      }
+      velocity = nextVel;
+      if (gameOver) {
+        restart();
+      }
+    }
+
+    window.addEventListener('keydown', event => {
+      const nextVel = directionMap[event.key];
+      if (!nextVel) return;
+      setDirection(nextVel);
+    });
+
+    const controls = document.querySelectorAll('#mobile-controls button');
+    controls.forEach(button => {
+      const direction = button.dataset.dir;
+      const nextVel = {
+        up: { x: 0, y: -1 },
+        down: { x: 0, y: 1 },
+        left: { x: -1, y: 0 },
+        right: { x: 1, y: 0 }
+      }[direction];
+
+      button.addEventListener('pointerdown', () => setDirection(nextVel));
+      button.addEventListener('click', () => setDirection(nextVel));
+    });
+
+    let touchStartX = 0;
+    let touchStartY = 0;
+    const swipeThreshold = 30;
+
+    window.addEventListener('touchstart', event => {
+      if (!event.changedTouches.length) return;
+      const touch = event.changedTouches[0];
+      touchStartX = touch.clientX;
+      touchStartY = touch.clientY;
+    }, { passive: true });
+
+    window.addEventListener('touchend', event => {
+      if (!event.changedTouches.length) return;
+      const touch = event.changedTouches[0];
+      const dx = touch.clientX - touchStartX;
+      const dy = touch.clientY - touchStartY;
+
+      if (Math.abs(dx) < swipeThreshold && Math.abs(dy) < swipeThreshold) {
+        return;
+      }
+
+      let nextVel;
+      if (Math.abs(dx) > Math.abs(dy)) {
+        nextVel = dx > 0 ? { x: 1, y: 0 } : { x: -1, y: 0 };
+      } else {
+        nextVel = dy > 0 ? { x: 0, y: 1 } : { x: 0, y: -1 };
+      }
+
+      setDirection(nextVel);
+    }, { passive: true });
+
+    function randomPosition() {
+      return {
+        x: Math.floor(Math.random() * tileCount),
+        y: Math.floor(Math.random() * tileCount)
+      };
+    }
+
+    function restart() {
+      snake = [{ x: 10, y: 10 }];
+      velocity = { x: 0, y: 0 };
+      apple = randomPosition();
+      score = 0;
+      speed = 8;
+      gameOver = false;
+      messageEl.textContent = 'Use arrow keys, WASD, or touch controls';
+      scoreEl.textContent = 'Score: 0';
+    }
+
+    function drawSquare(x, y, color) {
+      ctx.fillStyle = color;
+      ctx.fillRect(x * tileSize, y * tileSize, tileSize, tileSize);
+    }
+
+    function update() {
+      if (gameOver) return;
+      if (velocity.x === 0 && velocity.y === 0) return;
+
+      const head = {
+        x: snake[0].x + velocity.x,
+        y: snake[0].y + velocity.y
+      };
+
+      if (
+        head.x < 0 || head.x >= tileCount ||
+        head.y < 0 || head.y >= tileCount ||
+        snake.some(segment => segment.x === head.x && segment.y === head.y)
+      ) {
+        gameOver = true;
+      messageEl.textContent = 'Game over! Use buttons, swipe, or arrow keys to restart';
+      }
+
+      snake.unshift(head);
+
+      if (head.x === apple.x && head.y === apple.y) {
+        score += 1;
+        speed = Math.min(16, speed + 0.25);
+        apple = randomPosition();
+        while (snake.some(segment => segment.x === apple.x && segment.y === apple.y)) {
+          apple = randomPosition();
+        }
+        scoreEl.textContent = 'Score: ' + score;
+      } else {
+        snake.pop();
+      }
+    }
+
+    function draw() {
+      ctx.fillStyle = '#050a07';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      drawSquare(apple.x, apple.y, '#ff3168');
+
+      snake.forEach((segment, index) => {
+        drawSquare(segment.x, segment.y, index === 0 ? '#a8ff7e' : '#61ff47');
+      });
+    }
+
+    function gameLoop(timestamp) {
+      window.requestAnimationFrame(gameLoop);
+      if ((timestamp - lastTime) < 1000 / speed) return;
+      lastTime = timestamp;
+      update();
+      draw();
+    }
+
+    window.requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>
